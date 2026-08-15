@@ -24,8 +24,8 @@ is yours to make.
 ## Verified
 
 * `pytest -q` → **105 passed**.
-* `python -m bench.outage_test` → **100.00% availability over 986 requests**;
-  single-provider baseline 47.97%. See `bench/results.md`.
+* `python -m bench.outage_test` → **100.00% availability over 988 requests**, 0 lost;
+  single-provider baseline 28.14% (varies 28-48% between runs). See `bench/results.md`.
 * One **real** call through the gateway (Groq, then Gemini on failover) returned
   a real completion — so LiteLLM, the keys and the failover path all work for real.
 

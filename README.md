@@ -6,10 +6,11 @@ wait when everything is down, and attributes **cost per tenant and feature** —
 all behind an OpenAI-compatible API, so a client adopts it by changing one
 base-URL environment variable.
 
-> **100.00% availability across 986 requests while providers were failing.**
-> The same traffic pinned to a single provider: **47.97%**.
-> Nothing was lost: 868 answered immediately, 118 accepted into the deferrable
-> queue during a total outage.
+> **100.00% availability across 988 requests while providers were failing.**
+> The same traffic pinned to a single provider: **28.14%** (28–48% across runs —
+> which provider carries the recovery phase varies).
+> Nothing was lost: 869 answered immediately, 119 accepted into the deferrable
+> queue during a total outage, 0 errors reached a caller.
 > Reproduce it in ~25 seconds, no keys required: `python -m bench.outage_test`
 > — full numbers in [`bench/results.md`](bench/results.md).
 
@@ -146,6 +147,10 @@ The demo script — healthy → degrade → trip → reroute → heal — is in
   claimed with `SET NX`, so a blip cannot duplicate a side effect.
 * **Interactive vs deferrable.** A human waiting gets a fast, honest 503. A
   nightly summarisation gets queued and retried with backoff + jitter.
+* **Known trade-off: label cardinality.** `tenant` and `feature` come straight
+  from client headers onto Prometheus labels, so a careless caller can create
+  unbounded time series. In a real deployment you'd validate them against a
+  known tenant list at the edge before they reach the metric.
 
 ## Status
 
