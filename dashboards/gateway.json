@@ -1,0 +1,224 @@
+{
+  "title": "LLM Gateway",
+  "uid": "llm-gateway",
+  "tags": ["llm", "gateway", "reliability"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "5s",
+  "time": { "from": "now-15m", "to": "now" },
+  "editable": true,
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Availability (5m)",
+      "description": "Share of client requests that were answered or accepted into the queue.",
+      "gridPos": { "h": 5, "w": 6, "x": 0, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 3,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "orange", "value": 0.95 },
+              { "color": "green", "value": 0.99 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(gateway_client_requests_total{status=~\"ok|queued|replayed\"}[5m])) / clamp_min(sum(rate(gateway_client_requests_total[5m])), 0.0001)"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Requests / sec",
+      "gridPos": { "h": 5, "w": 6, "x": 6, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "reqps", "decimals": 1 }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "sum(rate(gateway_client_requests_total[1m]))" }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Queue depth",
+      "description": "Deferrable jobs waiting for a healthy provider.",
+      "gridPos": { "h": 5, "w": 6, "x": 12, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [{ "refId": "A", "expr": "gateway_queue_depth" }]
+    },
+    {
+      "type": "stat",
+      "title": "Spend / hour (all tenants)",
+      "gridPos": { "h": 5, "w": 6, "x": 18, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "currencyUSD", "decimals": 4 }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "sum(rate(gateway_cost_usd_total[5m])) * 3600" }
+      ]
+    },
+
+    {
+      "type": "state-timeline",
+      "title": "Circuit state per provider",
+      "description": "0 = closed, 1 = half-open (probing), 2 = open. This is the panel that tells the failover story.",
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 5 },
+      "options": { "mergeValues": true, "showValue": "never", "legend": { "displayMode": "list", "placement": "bottom" } },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": { "text": "closed", "color": "green", "index": 0 },
+                "1": { "text": "half-open", "color": "orange", "index": 1 },
+                "2": { "text": "open", "color": "red", "index": 2 }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "targets": [
+        { "refId": "A", "expr": "gateway_breaker_state", "legendFormat": "{{provider}}" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Requests / sec by provider",
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 5 },
+      "fieldConfig": { "defaults": { "unit": "reqps", "custom": { "fillOpacity": 10 } }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (provider) (rate(gateway_requests_total[1m]))",
+          "legendFormat": "{{provider}}"
+        }
+      ]
+    },
+
+    {
+      "type": "timeseries",
+      "title": "p95 latency by provider",
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 12 },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le, provider) (rate(gateway_latency_seconds_bucket[5m])))",
+          "legendFormat": "{{provider}} p95"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Error rate by provider",
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 12 },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "max": 1, "min": 0 }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (provider) (rate(gateway_errors_total[1m])) / clamp_min(sum by (provider) (rate(gateway_requests_total[1m])), 0.0001)",
+          "legendFormat": "{{provider}}"
+        }
+      ]
+    },
+
+    {
+      "type": "timeseries",
+      "title": "Failover events",
+      "description": "Every time a request moved from one provider to the next.",
+      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 19 },
+      "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "bars", "fillOpacity": 60 } }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (from_provider, to_provider) (increase(gateway_failover_total[1m]))",
+          "legendFormat": "{{from_provider}} → {{to_provider}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Client outcomes",
+      "description": "What callers actually got: ok / queued / failed / replayed.",
+      "gridPos": { "h": 7, "w": 8, "x": 8, "y": 19 },
+      "fieldConfig": { "defaults": { "unit": "reqps", "custom": { "fillOpacity": 20, "stacking": { "mode": "normal" } } }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (status) (rate(gateway_client_requests_total[1m]))",
+          "legendFormat": "{{status}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Cost / hour by tenant & feature",
+      "description": "The reason a gateway exists: who is spending, on what.",
+      "gridPos": { "h": 7, "w": 8, "x": 16, "y": 19 },
+      "fieldConfig": { "defaults": { "unit": "currencyUSD", "decimals": 5 }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (tenant, feature) (rate(gateway_cost_usd_total[5m])) * 3600",
+          "legendFormat": "{{tenant}} / {{feature}}"
+        }
+      ]
+    },
+
+    {
+      "type": "timeseries",
+      "title": "Tokens / sec by tenant",
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 26 },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (tenant, kind) (rate(gateway_tokens_total[5m]))",
+          "legendFormat": "{{tenant}} {{kind}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Queue: enqueued vs drained",
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 26 },
+      "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "bars", "fillOpacity": 60 } }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum (increase(gateway_queued_total[1m]))",
+          "legendFormat": "enqueued"
+        },
+        {
+          "refId": "B",
+          "expr": "sum by (status) (increase(gateway_queue_completed_total[1m]))",
+          "legendFormat": "drained {{status}}"
+        },
+        {
+          "refId": "C",
+          "expr": "increase(gateway_queue_retries_total[1m])",
+          "legendFormat": "retries"
+        }
+      ]
+    }
+  ]
+}

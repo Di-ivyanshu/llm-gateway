@@ -1,0 +1,19 @@
+# Prometheus scrape config for the gateway.
+#
+# Windows, no Docker:
+#   1. download the prometheus zip from https://prometheus.io/download/
+#   2. unzip it, drop this file in next to prometheus.exe (or pass it explicitly)
+#   3. .\prometheus.exe --config.file=D:\llm-gateway\ops\prometheus.yml
+#   4. open http://localhost:9090 → Status → Targets → "llm-gateway" should be UP
+#
+# Then point Grafana at http://localhost:9090 and import dashboards/gateway.json.
+
+global:
+  scrape_interval: 5s        # short, so the demo moves while you watch it
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: llm-gateway
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["localhost:8080"]

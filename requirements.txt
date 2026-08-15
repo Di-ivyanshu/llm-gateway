@@ -1,6 +1,13 @@
+# runtime
 fastapi
 uvicorn[standard]
 pydantic
 python-dotenv
 httpx
+litellm
+redis
+prometheus-client
+
+# tests (offline — no keys, no Redis, no network)
 pytest
+fakeredis

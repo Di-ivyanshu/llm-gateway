@@ -10,3 +10,6 @@ __pycache__/
 .DS_Store
 .vscode/
 .idea/
+
+# local session context (private)
+CLAUDE.md
