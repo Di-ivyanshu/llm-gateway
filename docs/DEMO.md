@@ -25,13 +25,15 @@ $env:HEALTH_WINDOW_S = "60"
 python -m uvicorn app.main:app --port 8080
 ```
 
-**2 — worker** (drains anything queued during the total outage):
+**2 — worker.** Only needed if you set `REDIS_URL`. Without Redis the queue lives
+inside the API process, which drains it itself (`GATEWAY_INLINE_WORKER`), so for
+the demo you can skip this terminal entirely.
 
 ```powershell
 cd D:\llm-gateway
 .venv\Scripts\activate
 $env:GATEWAY_FAKE_PROVIDERS = "1"
-python -m app.worker
+python -m app.worker            # Redis only
 ```
 
 **3 — Prometheus:**

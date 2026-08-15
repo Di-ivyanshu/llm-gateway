@@ -99,19 +99,20 @@ curl -X POST http://localhost:8080/v1/chat/completions ^
   -d "{\"model\":\"gateway-auto\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}"
 ```
 
-Drain queued work in a second terminal:
+Nothing is mandatory beyond one provider key: with no `REDIS_URL` the health
+window, queue and idempotency store fall back to in-process equivalents, and the
+API drains its own deferrable queue in a background thread.
+
+Once you do set `REDIS_URL`, run real workers instead — as many as you like:
 
 ```
 python -m app.worker
 ```
 
-Nothing is mandatory beyond one provider key: with no `REDIS_URL` the health
-window, queue and idempotency store fall back to in-process equivalents.
-
 ## Tests & benchmark
 
 ```
-pytest -q                        # 104 tests, fully offline: no keys, no Redis, no network
+pytest -q                        # 105 tests, fully offline: no keys, no Redis, no network
 python -m bench.outage_test      # ~25s availability benchmark, fake providers
 ```
 

@@ -18,6 +18,8 @@ default.
 from __future__ import annotations
 
 import logging
+import threading
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Header, Response
 from fastapi.responses import JSONResponse
@@ -26,8 +28,37 @@ from pydantic import BaseModel
 from . import breaker, chaos, config, health, metrics, queue, router
 from .shapes import completion_body
 
-app = FastAPI(title="llm-gateway", version="0.5.0")
 log = logging.getLogger("gateway")
+
+
+def _drain_loop(stop: threading.Event) -> None:
+    """Background drain of the deferrable queue (see config.INLINE_WORKER)."""
+    from . import worker
+
+    while not stop.is_set():
+        try:
+            if worker.run_once() is None:
+                stop.wait(config.WORKER_POLL_S)
+        except Exception:  # noqa: BLE001 — a bad job must not kill the loop
+            log.exception("inline worker error")
+            stop.wait(config.WORKER_POLL_S)
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    stop = threading.Event()
+    thread = None
+    if config.INLINE_WORKER:
+        thread = threading.Thread(target=_drain_loop, args=(stop,), daemon=True)
+        thread.start()
+        log.info("inline queue worker started (no REDIS_URL, or explicitly enabled)")
+    yield
+    stop.set()
+    if thread is not None:
+        thread.join(timeout=2)
+
+
+app = FastAPI(title="llm-gateway", version="0.5.0", lifespan=lifespan)
 
 
 class Message(BaseModel):

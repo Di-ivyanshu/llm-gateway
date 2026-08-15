@@ -1,4 +1,6 @@
 """End-to-end through the HTTP layer — still no network."""
+import time
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -110,6 +112,31 @@ def test_a_queued_job_drains_once_a_provider_returns(monkeypatch):
     result = client.get(f"/v1/jobs/{job_id}").json()
     assert result["status"] == "done"
     assert result["response"]["choices"][0]["message"]["content"] == "recovered"
+
+
+def test_the_inline_worker_drains_the_queue_by_itself(monkeypatch):
+    """With no Redis the API process drains its own queue — see config.INLINE_WORKER."""
+    monkeypatch.setattr(config, "INLINE_WORKER", True)
+    monkeypatch.setattr(config, "WORKER_POLL_S", 0.05)
+    all_providers_down(monkeypatch)
+
+    with TestClient(app) as live:          # `with` is what runs the lifespan
+        job_id = live.post(
+            "/v1/chat/completions",
+            json=BODY,
+            headers={**HEADERS, "X-Class": "deferrable"},
+        ).json()["job_id"]
+        monkeypatch.setattr(providers, "_completion", lambda **kw: FakeResponse("drained"))
+
+        deadline = time.time() + 5
+        while time.time() < deadline:
+            result = live.get(f"/v1/jobs/{job_id}").json()
+            if result["status"] == "done":
+                break
+            time.sleep(0.05)
+
+    assert result["status"] == "done"
+    assert result["response"]["choices"][0]["message"]["content"] == "drained"
 
 
 def test_unknown_job_is_404():

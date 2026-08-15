@@ -14,16 +14,16 @@ is yours to make.
 | `app/metrics.py` | Every Prometheus series the dashboard draws. |
 | `app/breaker.py` | closed → open → half-open → closed, driven by the health window. |
 | `app/router.py` | Preference list per request class, failover, optional hedging, cost booking. |
-| `app/queue.py` + `app/worker.py` | Deferrable jobs, exponential backoff + jitter, idempotency (SET NX). |
+| `app/queue.py` + `app/worker.py` | Deferrable jobs, exponential backoff + jitter, idempotency (SET NX). Without `REDIS_URL` the API drains its own queue in a background thread; with Redis, run `python -m app.worker` as separate processes. |
 | `app/cost.py` | Tokens → USD, attributed to tenant × feature. |
 | `app/chaos.py` + `POST /admin/chaos` | Degrade a provider on demand — the demo and benchmark run on this. |
 | `bench/outage_test.py` | The availability number. `python -m bench.outage_test` (~25s, free). |
 | `dashboards/gateway.json`, `ops/prometheus.yml` | Import-ready Grafana dashboard + scrape config. |
-| `tests/` | 104 offline tests: no keys, no Redis, no network. |
+| `tests/` | 105 offline tests: no keys, no Redis, no network. |
 
 ## Verified
 
-* `pytest -q` → **104 passed**.
+* `pytest -q` → **105 passed**.
 * `python -m bench.outage_test` → **100.00% availability over 986 requests**;
   single-provider baseline 47.97%. See `bench/results.md`.
 * One **real** call through the gateway (Groq, then Gemini on failover) returned

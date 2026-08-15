@@ -99,3 +99,9 @@ DEFAULT_PRICE: tuple[float, float] = (0.0, 0.0)
 # --- infra -------------------------------------------------------------------
 REDIS_URL: str = os.getenv("REDIS_URL", "")
 ADMIN_TOKEN: str = os.getenv("ADMIN_TOKEN", "")  # empty = /admin/* open locally
+
+# Drain the deferrable queue from inside the API process. Without Redis the queue
+# lives in memory, so a separate `python -m app.worker` would be looking at a
+# different (empty) queue — hence: on by default when there is no REDIS_URL, off
+# when there is one, because then you want real worker processes.
+INLINE_WORKER: bool = _b("GATEWAY_INLINE_WORKER", not REDIS_URL)
