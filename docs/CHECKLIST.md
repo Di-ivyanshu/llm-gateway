@@ -174,9 +174,9 @@ dashboard shows the trip → reroute → recovery, with an availability % and a 
 ---
 
 ## Finale — connect it to Nocturne (the cohesion move)
-- [x] ⌨️ In **Nocturne's `.env`**: `OPENAI_BASE_URL=http://localhost:8080/v1`
-- [x] ✅ Nocturne's LLM calls now flow through the gateway → the two projects reference each other.
-- [x] ⌨️ Mention this link in both READMEs.
+- [ ] ⌨️ In **Nocturne's `.env`**: `OPENAI_BASE_URL=http://localhost:8080/v1`
+- [ ] ✅ Nocturne's LLM calls now flow through the gateway → the two projects reference each other.
+- [ ] ⌨️ Mention this link in both READMEs.
 
 **Resume line:** *Built an LLM gateway with per-provider circuit breaking and automatic
 failover; sustained X% availability through simulated provider outages, with per-tenant
