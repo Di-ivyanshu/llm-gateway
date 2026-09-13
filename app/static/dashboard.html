@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LLM Gateway — live</title>
+<style>
+  :root{
+    color-scheme: light;
+    --plane:#f9f9f7; --surface:#fcfcfb; --ink:#0b0b0b; --ink-2:#52514e; --muted:#898781;
+    --grid:#e1e0d9; --rule:#c3c2b7; --ring:rgba(11,11,11,.10);
+    --groq:#2a78d6; --gemini:#eb6834; --openrouter:#1baf7a;
+    --good:#0ca30c; --warning:#fab219; --critical:#d03b3b;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      color-scheme: dark;
+      --plane:#0d0d0d; --surface:#1a1a19; --ink:#fff; --ink-2:#c3c2b7; --muted:#898781;
+      --grid:#2c2c2a; --rule:#383835; --ring:rgba(255,255,255,.10);
+      --groq:#3987e5; --gemini:#d95926; --openrouter:#199e70;
+    }
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--plane);color:var(--ink);
+       font:14px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif;padding:16px}
+  h1{font-size:16px;margin:0;letter-spacing:-.01em}
+  h2{font-size:12px;margin:0 0 10px;color:var(--muted);font-weight:600;
+     text-transform:uppercase;letter-spacing:.06em}
+  .wrap{max-width:1180px;margin:0 auto}
+  header{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--good)}
+  .dot.stale{background:var(--critical)}
+  .sub{color:var(--muted);font-size:12px}
+  .spacer{flex:1}
+  button{font:inherit;font-size:12px;padding:5px 10px;border-radius:7px;cursor:pointer;
+         background:var(--surface);color:var(--ink);border:1px solid var(--rule)}
+  button:hover{border-color:var(--ink-2)}
+  button.on{border-color:var(--critical);color:var(--critical)}
+  .card{background:var(--surface);border:1px solid var(--ring);border-radius:10px;padding:14px}
+  .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:12px}
+  .tile .v{font-size:26px;letter-spacing:-.02em;margin-top:2px}
+  .tile .k{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+  .tile .note{font-size:11px;color:var(--muted);margin-top:2px}
+  .cols{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px}
+  @media (max-width:860px){.cols{grid-template-columns:1fr}}
+  .prov{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--grid)}
+  .prov:last-child{border-bottom:0}
+  .swatch{width:9px;height:9px;border-radius:2px;flex:none;display:inline-block}
+  .pname{font-weight:600;min-width:82px}
+  .pmodel{color:var(--muted);font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .chip{font-size:11px;padding:2px 7px;border-radius:999px;border:1px solid currentColor;
+        white-space:nowrap;display:inline-block}
+  .chip.closed{color:var(--good)} .chip.half_open{color:var(--warning)} .chip.open{color:var(--critical)}
+  .chip.ok{color:var(--good)} .chip.failed{color:var(--critical)}
+  .chip.queued{color:var(--warning)} .chip.replayed{color:var(--muted)}
+  .pstat{margin-left:auto;display:flex;gap:14px;font-variant-numeric:tabular-nums;font-size:12px;color:var(--ink-2)}
+  .pstat b{font-weight:600;color:var(--ink)}
+  table{width:100%;border-collapse:collapse;font-size:12px;font-variant-numeric:tabular-nums}
+  th{text-align:left;font-weight:600;color:var(--muted);font-size:11px;text-transform:uppercase;
+     letter-spacing:.06em;padding:0 8px 7px 0;border-bottom:1px solid var(--rule)}
+  td{padding:7px 8px 7px 0;border-bottom:1px solid var(--grid);white-space:nowrap}
+  td.chain{white-space:normal;color:var(--ink-2)}
+  .fail{color:var(--critical)}
+  .scroll{max-height:340px;overflow:auto}
+  .legend{display:flex;gap:14px;font-size:11px;color:var(--ink-2);margin-top:8px;flex-wrap:wrap;
+          align-items:center}
+  .legend span{display:inline-flex;align-items:center;gap:5px}
+  .empty{color:var(--muted);font-size:12px;padding:14px 0}
+  svg{display:block;width:100%;height:120px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <span class="dot" id="live"></span>
+    <h1>LLM Gateway</h1>
+    <span class="sub" id="clock">connecting…</span>
+    <span class="spacer"></span>
+    <span class="sub">chaos:</span>
+    <button data-p="groq">break groq</button>
+    <button data-p="gemini">break gemini</button>
+    <button data-p="openrouter">break openrouter</button>
+    <button id="reset">reset all</button>
+  </header>
+
+  <div class="tiles" id="tiles"></div>
+
+  <div class="cols">
+    <section class="card">
+      <h2>Providers</h2>
+      <div id="providers"></div>
+    </section>
+    <section class="card">
+      <h2>Requests per second, by provider that answered</h2>
+      <svg id="chart" viewBox="0 0 600 120" preserveAspectRatio="none" role="img"
+           aria-label="Requests per second by provider over the last 60 seconds"></svg>
+      <div class="legend" id="legend"></div>
+    </section>
+  </div>
+
+  <section class="card">
+    <h2>Live requests</h2>
+    <div class="scroll">
+      <table>
+        <thead><tr>
+          <th>time</th><th>tenant</th><th>feature</th><th>class</th>
+          <th>status</th><th>route</th><th>latency</th><th>cost</th>
+        </tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+      <div class="empty" id="empty">No requests yet — send one and it shows up here.</div>
+    </div>
+  </section>
+</div>
+
+<script>
+const PROVIDERS = ["groq", "gemini", "openrouter"];
+const COLOR = p => getComputedStyle(document.documentElement).getPropertyValue("--" + p).trim() || "#888";
+const WINDOW_S = 60, BUCKET_S = 2;
+
+let seq = 0, events = [], chaosOn = {}, lastOk = 0;
+
+const fmtTime = ts => new Date(ts * 1000).toLocaleTimeString([], {hour12: false});
+const el = id => document.getElementById(id);
+
+function tile(k, v, note) {
+  return '<div class="card tile"><div class="k">' + k + '</div><div class="v">' + v + '</div>' +
+         (note ? '<div class="note">' + note + '</div>' : '') + '</div>';
+}
+
+function render(feed) {
+  // Tiles are computed from the request window, so they mean "right now" rather
+  // than "since the process started" the way a raw counter would.
+  const served = events.filter(e => e.status === "ok").length;
+  const kept = events.filter(e => e.status === "ok" || e.status === "queued").length;
+  const lost = events.filter(e => e.status === "failed").length;
+  const failovers = events.reduce((n, e) => n + (e.failovers || 0), 0);
+  const spend = events.reduce((n, e) => n + (e.cost_usd || 0), 0);
+  const avail = events.length ? (kept / events.length * 100) : 100;
+  const lat = events.filter(e => e.status === "ok").map(e => e.latency_ms).sort((a, b) => a - b);
+  const p95 = lat.length ? lat[Math.min(lat.length - 1, Math.floor(lat.length * 0.95))] : 0;
+
+  el("tiles").innerHTML =
+    tile("Availability", avail.toFixed(1) + "%", kept + " kept · " + lost + " lost") +
+    tile("Requests", events.length, served + " answered now") +
+    tile("Failovers", failovers, "reroutes to a healthy provider") +
+    tile("p95 latency", (p95 / 1000).toFixed(2) + "s", "as the caller sees it") +
+    tile("Queue depth", feed.queue_depth, "deferrable jobs waiting") +
+    tile("Est. spend", "$" + spend.toFixed(5), "this window, at list price");
+
+  el("providers").innerHTML = PROVIDERS.map(p => {
+    const s = feed.providers[p] || {};
+    const st = s.state || "closed";
+    const label = {closed: "✓ closed", half_open: "◐ probing", open: "✕ open"}[st];
+    const sr = s.count ? (s.success_rate * 100).toFixed(0) + "%" : "—";
+    const primary = (feed.preference.interactive || [])[0] === p ? " · primary" : "";
+    const model = (feed.models[p] || "").split("/").slice(1).join("/");
+    return '<div class="prov">' +
+      '<span class="swatch" style="background:' + COLOR(p) + '"></span>' +
+      '<span class="pname">' + p + '</span>' +
+      '<span class="chip ' + st + '">' + label + '</span>' +
+      '<span class="pmodel">' + model + primary + '</span>' +
+      '<span class="pstat"><span>success <b>' + sr + '</b></span>' +
+      '<span>p95 <b>' + (s.p95 ? (s.p95 / 1000).toFixed(1) + "s" : "—") + '</b></span>' +
+      '<span>calls <b>' + (s.count || 0) + '</b></span></span></div>';
+  }).join("");
+
+  // Stacked bars: one bucket per 2s, colour = the provider that answered.
+  const now = feed.now, n = WINDOW_S / BUCKET_S;
+  const buckets = Array.from({length: n}, () => ({groq: 0, gemini: 0, openrouter: 0}));
+  for (const e of events) {
+    if (e.status !== "ok" || !e.provider) continue;
+    const age = now - e.ts;
+    if (age < 0 || age > WINDOW_S) continue;
+    const i = n - 1 - Math.floor(age / BUCKET_S);
+    if (buckets[i] && buckets[i][e.provider] !== undefined) buckets[i][e.provider]++;
+  }
+  const peak = Math.max(1, ...buckets.map(b => b.groq + b.gemini + b.openrouter));
+  const W = 600, H = 120, bw = W / n;
+  let svg = '<line x1="0" y1="' + (H - 0.5) + '" x2="' + W + '" y2="' + (H - 0.5) +
+            '" stroke="var(--rule)" stroke-width="1"/>';
+  buckets.forEach((b, i) => {
+    let y = H - 1;
+    const ago = (n - 1 - i) * BUCKET_S;
+    PROVIDERS.forEach(p => {
+      if (!b[p]) return;
+      const h = (b[p] / peak) * (H - 10);
+      y -= h;
+      svg += '<rect x="' + (i * bw + 1).toFixed(1) + '" y="' + y.toFixed(1) +
+             '" width="' + (bw - 2).toFixed(1) + '" height="' + Math.max(1, h - 2).toFixed(1) +
+             '" fill="' + COLOR(p) + '" rx="1.5"><title>' + ago + 's ago · ' + p + ': ' +
+             b[p] + ' in ' + BUCKET_S + 's</title></rect>';
+      y -= 2;   // surface gap between stacked segments
+    });
+  });
+  el("chart").innerHTML = svg;
+  el("legend").innerHTML = PROVIDERS.map(p =>
+    '<span><span class="swatch" style="background:' + COLOR(p) + '"></span>' + p + '</span>').join("") +
+    '<span style="color:var(--muted)">peak ' + (peak / BUCKET_S).toFixed(1) + '/s · last ' +
+    WINDOW_S + 's</span>';
+
+  el("empty").style.display = events.length ? "none" : "block";
+  el("rows").innerHTML = events.slice(0, 60).map(e => {
+    const chain = (e.attempts || []).map(a => a.ok
+      ? a.provider
+      : '<span class="fail">' + a.provider + "(" + a.error_type + ")</span>").join(" → ")
+      || (e.job_id || "—");
+    return '<tr><td>' + fmtTime(e.ts) + '</td><td>' + e.tenant + '</td><td>' + e.feature +
+      '</td><td>' + e["class"] + '</td>' +
+      '<td><span class="chip ' + e.status + '">' + e.status + '</span></td>' +
+      '<td class="chain">' + chain + '</td>' +
+      '<td>' + (e.status === "ok" ? (e.latency_ms / 1000).toFixed(2) + "s" : "—") + '</td>' +
+      '<td>' + (e.cost_usd ? "$" + e.cost_usd.toFixed(6) : "—") + '</td></tr>';
+  }).join("");
+
+  // Buttons reflect what the server says is broken, not what you last clicked.
+  chaosOn = feed.chaos || {};
+  document.querySelectorAll("button[data-p]").forEach(b => {
+    const on = !!chaosOn[b.dataset.p];
+    b.classList.toggle("on", on);
+    b.textContent = (on ? "fix " : "break ") + b.dataset.p;
+  });
+}
+
+async function poll() {
+  try {
+    const feed = await (await fetch("/admin/feed?since=" + seq)).json();
+    if (feed.requests.length) {
+      seq = Math.max(seq, ...feed.requests.map(r => r.seq));
+      events = feed.requests.concat(events).slice(0, 400);
+    }
+    lastOk = Date.now();
+    el("clock").textContent = "live · updated " + new Date().toLocaleTimeString([], {hour12: false});
+    render(feed);
+  } catch (err) {
+    el("clock").textContent = "gateway unreachable — is it still running on :8080?";
+  }
+  el("live").classList.toggle("stale", Date.now() - lastOk > 4000);
+}
+
+document.querySelectorAll("button[data-p]").forEach(b => b.onclick = async () => {
+  const p = b.dataset.p, on = !!chaosOn[p];
+  await fetch("/admin/chaos", {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({provider: p, mode: on ? "off" : "error", error_type: "server_error"}),
+  });
+  poll();
+});
+el("reset").onclick = async () => {
+  await fetch("/admin/reset", {method: "POST"});
+  seq = 0; events = []; poll();
+};
+
+poll();
+setInterval(poll, 1000);
+</script>
+</body>
+</html>

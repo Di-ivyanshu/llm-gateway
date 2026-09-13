@@ -1,52 +1,42 @@
 # The 90-second demo (recording script)
 
-Goal of the clip: **healthy traffic → a provider degrades → the breaker trips →
-traffic reroutes → the breaker heals**, with the Grafana panels moving while it
-happens.
+The story the clip tells: **healthy traffic → a provider breaks → the breaker
+trips → traffic reroutes → everything breaks → work is queued instead of lost →
+providers return → the breaker heals itself.**
 
-Everything below runs with **fake providers**, so the demo costs nothing and
-behaves identically every time. Nothing here needs a real API key.
+Everything runs with **fake providers**, so it costs nothing, never touches your
+quota, and behaves the same every take. Nothing to install — the dashboard is
+built into the gateway.
 
 ---
 
-## Setup (before you hit record)
+## Setup — two terminals and a browser tab
 
-Four terminals + a browser.
-
-**1 — gateway** (fake providers, short cooldown so recovery fits in the clip):
+**Terminal 1 — the gateway.** Short cooldown so recovery fits inside the clip:
 
 ```powershell
 cd D:\llm-gateway
 .venv\Scripts\activate
 $env:GATEWAY_FAKE_PROVIDERS = "1"
 $env:GATEWAY_FAKE_LATENCY_MS = "120"
-$env:BREAKER_COOLDOWN_S = "10"
+$env:BREAKER_COOLDOWN_S = "8"
+$env:BREAKER_MIN_SAMPLES = "3"
 $env:HEALTH_WINDOW_S = "60"
 python -m uvicorn app.main:app --port 8080
 ```
 
-**2 — worker.** Only needed if you set `REDIS_URL`. Without Redis the queue lives
-inside the API process, which drains it itself (`GATEWAY_INLINE_WORKER`), so for
-the demo you can skip this terminal entirely.
+**Terminal 2 — traffic:**
 
 ```powershell
 cd D:\llm-gateway
 .venv\Scripts\activate
-$env:GATEWAY_FAKE_PROVIDERS = "1"
-python -m app.worker            # Redis only
+python -m bench.traffic --rate 6
 ```
 
-**3 — Prometheus:**
-
-```powershell
-.\prometheus.exe --config.file=D:\llm-gateway\ops\prometheus.yml
-```
-
-**4 — Grafana:** start `grafana-server.exe`, open http://localhost:3000, add the
-Prometheus datasource (`http://localhost:9090`), then import
-`dashboards/gateway.json`. Set the time range to **Last 15 minutes**, refresh
-**5s**, and put the **Circuit state per provider** panel where the camera can
-see it.
+**Browser — <http://localhost:8080/dashboard>.** Full screen. Everything you
+need to show is on this one page: the tiles, the provider list, the
+requests-per-second chart, the live request table, and the chaos buttons in the
+header. Hit **reset all** once before recording so the window starts clean.
 
 ---
 
@@ -54,75 +44,43 @@ see it.
 
 | t | You do | What the viewer sees |
 | --- | --- | --- |
-| 0:00 | Start traffic (terminal 4, below) | RPS climbs, all requests served by **groq**, availability 100% |
-| 0:15 | Groq starts failing | error rate for groq spikes, circuit-state row turns **red (open)** |
-| 0:20 | — | RPS by provider shows **gemini** picking it all up, availability stays 100% |
-| 0:35 | Gemini fails too | second row goes red, **openrouter** carries the traffic |
-| 0:50 | Everything fails, deferrable traffic | client outcomes shows **queued**, queue depth rises — no errors reach the caller |
-| 1:00 | Chaos cleared | rows go **orange (half-open)** then **green (closed)** on their own |
-| 1:15 | Worker drains | queue depth falls back to 0 |
-| 1:25 | Zoom on the cost panel | spend per **tenant × feature** |
+| 0:00 | nothing — let it run 10s | bars climb in **blue (groq)**, availability 100%, cost ticking up per tenant |
+| 0:12 | click **break groq** | the table fills with `groq(server_error) → gemini`, bars turn **orange (gemini)** — availability stays 100% |
+| 0:25 | point at the groq row | it flips `✓ closed` → `✕ open`: the gateway stopped even trying, failovers counter climbing |
+| 0:35 | click **break gemini** | **aqua (openrouter)** takes over, second row goes red |
+| 0:50 | click **break openrouter** | interactive rows go **failed** (honest 503), but `globex / nightly-report` rows go **queued** — queue depth rises instead of losing work |
+| 1:05 | click **fix** on all three | rows go `◐ probing` then `✓ closed` **by themselves** — nobody restarted anything |
+| 1:15 | — | queue depth drains back to 0 as the parked jobs run |
+| 1:25 | scroll the request table | every row shows tenant, feature, route taken, latency, cost |
 
-Terminal 4 — one command drives the whole timeline (traffic + chaos):
-
-```powershell
-cd D:\llm-gateway
-.venv\Scripts\activate
-python -m bench.outage_test --url http://localhost:8080 --rate 20
-```
-
-It prints the availability number at the end — that is the number for the README.
+Say this over the top: *"No client code changed. The app still thinks it is
+talking to OpenAI."*
 
 ---
 
-## Driving it by hand instead
+## Optional second half — the real product on top of it
 
-If you want to narrate each step yourself:
+If you want to prove it is not a toy, start Nocturne (the RAG project) with its
+`.env` pointing at `http://localhost:8080/v1`, ask it a question, and show the
+dashboard picking up `tenant=nocturne, feature=rag` rows in real time — then
+break a provider mid-answer and show the answer still arriving.
 
-```powershell
-# steady traffic in one terminal
-while ($true) {
-  Invoke-RestMethod -Method Post http://localhost:8080/v1/chat/completions `
-    -Headers @{ "X-Tenant"="acme"; "X-Feature"="chat"; "X-Request-Id"=[guid]::NewGuid() } `
-    -ContentType "application/json" `
-    -Body '{"model":"gateway-auto","messages":[{"role":"user","content":"hi"}]}' |
-    Select-Object -ExpandProperty gateway | Select-Object provider, failovers
-  Start-Sleep -Milliseconds 200
-}
-```
+---
+
+## The numbers to say out loud
 
 ```powershell
-# break groq
-Invoke-RestMethod -Method Post http://localhost:8080/admin/chaos -ContentType "application/json" `
-  -Body '{"provider":"groq","mode":"error","error_type":"server_error"}'
-
-# make gemini slow instead of broken
-Invoke-RestMethod -Method Post http://localhost:8080/admin/chaos -ContentType "application/json" `
-  -Body '{"provider":"gemini","mode":"latency","latency_ms":9000}'
-
-# watch the breakers
-Invoke-RestMethod http://localhost:8080/admin/status | ConvertTo-Json -Depth 5
-
-# heal everything
-Invoke-RestMethod -Method Post http://localhost:8080/admin/reset
+python -m bench.outage_test        # ~25s, prints the availability number
 ```
 
-Queued work during a full outage:
-
-```powershell
-$r = Invoke-RestMethod -Method Post http://localhost:8080/v1/chat/completions `
-  -Headers @{ "X-Tenant"="acme"; "X-Feature"="nightly"; "X-Request-Id"="job-1"; "X-Class"="deferrable" } `
-  -ContentType "application/json" `
-  -Body '{"model":"gateway-auto","messages":[{"role":"user","content":"summarise"}]}'
-$r.job_id
-Invoke-RestMethod "http://localhost:8080/v1/jobs/$($r.job_id)"   # queued → done once the worker drains it
-```
+> 100% availability across 988 requests through a staged outage; the same
+> traffic pinned to a single provider: 28%.
 
 ---
 
 ## After recording
 
 1. Trim to ~90 seconds.
-2. Put the link at the very top of `README.md` (replace the TODO line).
-3. Re-run `python -m bench.outage_test` and paste the fresh availability number
-   next to it — the number and the video should tell the same story.
+2. Replace the TODO line at the top of `README.md` with the video link.
+3. Re-run `python -m bench.outage_test` and make sure the number you quote
+   matches `bench/results.md`.

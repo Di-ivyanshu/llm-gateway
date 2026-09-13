@@ -1,4 +1,5 @@
 """End-to-end through the HTTP layer — still no network."""
+import json
 import time
 
 import pytest
@@ -79,6 +80,66 @@ def test_failover_is_reported_in_the_response(monkeypatch):
     assert r.headers["X-Gateway-Provider"] == "gemini"
     assert r.headers["X-Gateway-Failovers"] == "1"
     assert r.json()["gateway"]["attempts"][0]["error_type"] == "server_error"
+
+
+# --- streaming ---------------------------------------------------------------
+
+def _sse_deltas(text: str) -> list[str]:
+    """Pull the content deltas out of an SSE body, the way a client would."""
+    out = []
+    for line in text.splitlines():
+        if not line.startswith("data:"):
+            continue
+        payload = line[5:].strip()
+        if payload == "[DONE]":
+            break
+        out.append(json.loads(payload)["choices"][0]["delta"].get("content"))
+    return [c for c in out if c]
+
+
+def test_stream_true_returns_openai_sse(monkeypatch):
+    monkeypatch.setattr(providers, "_completion", lambda **kw: FakeResponse("hello there world"))
+    r = post({**BODY, "stream": True})
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("text/event-stream")
+    assert "".join(_sse_deltas(r.text)) == "hello there world"
+    assert r.text.rstrip().endswith("data: [DONE]")
+
+
+def test_streamed_chunks_are_chat_completion_chunks(monkeypatch):
+    monkeypatch.setattr(providers, "_completion", lambda **kw: FakeResponse("one two"))
+    frames = [
+        json.loads(line[5:])
+        for line in post({**BODY, "stream": True}).text.splitlines()
+        if line.startswith("data:") and line[5:].strip() != "[DONE]"
+    ]
+    assert {f["object"] for f in frames} == {"chat.completion.chunk"}
+    assert frames[0]["choices"][0]["delta"] == {"role": "assistant"}   # opening frame
+    assert frames[-1]["choices"][0]["finish_reason"] == "stop"         # closing frame
+
+
+def test_streaming_still_fails_over(monkeypatch):
+    monkeypatch.setattr(
+        providers, "_completion", by_model({config.PROVIDER_MODELS["groq"]: fails()})
+    )
+    r = post({**BODY, "stream": True})
+    assert r.status_code == 200
+    assert r.headers["X-Gateway-Provider"] == "gemini"   # buffered routing, so failover works
+
+
+def test_streaming_errors_are_still_json(monkeypatch):
+    all_providers_down(monkeypatch)
+    r = post({**BODY, "stream": True})
+    assert r.status_code == 503
+    assert r.json()["error"]["type"] == "no_provider_available"
+
+
+def test_an_idempotent_replay_of_a_stream_is_also_a_stream(monkeypatch):
+    monkeypatch.setattr(providers, "_completion", lambda **kw: FakeResponse("cached answer"))
+    post({**BODY, "stream": True}, **{"X-Idempotency-Key": "k-stream"})
+    replay = post({**BODY, "stream": True}, **{"X-Idempotency-Key": "k-stream"})
+    assert replay.headers["X-Idempotent-Replay"] == "true"
+    assert "".join(_sse_deltas(replay.text)) == "cached answer"
 
 
 # --- everything down ---------------------------------------------------------
@@ -206,3 +267,60 @@ def test_admin_requires_the_token_when_one_is_set(monkeypatch):
     monkeypatch.setattr(config, "ADMIN_TOKEN", "s3cret")
     assert client.get("/admin/status").status_code == 403
     assert client.get("/admin/status", headers={"X-Admin-Token": "s3cret"}).status_code == 200
+
+
+# --- live dashboard ----------------------------------------------------------
+
+def test_dashboard_is_served():
+    r = client.get("/dashboard")
+    assert r.status_code == 200
+    assert "LLM Gateway" in r.text
+    assert "/admin/feed" in r.text          # the page polls the feed
+
+
+def test_feed_reports_providers_queue_and_requests():
+    post()
+    feed = client.get("/admin/feed").json()
+    assert set(feed["providers"]) == set(config.PROVIDERS)
+    assert feed["queue_depth"] == 0
+    assert feed["models"]["groq"] == config.PROVIDER_MODELS["groq"]
+    assert len(feed["requests"]) == 1
+    row = feed["requests"][0]
+    assert (row["tenant"], row["feature"], row["status"]) == ("acme", "chat", "ok")
+    assert row["attempts"] == [{"provider": "groq", "ok": True, "error_type": None}]
+
+
+def test_feed_since_returns_only_what_is_new():
+    post()
+    first = client.get("/admin/feed").json()["requests"]
+    seq = first[0]["seq"]
+    assert client.get(f"/admin/feed?since={seq}").json()["requests"] == []
+    post()
+    fresh = client.get(f"/admin/feed?since={seq}").json()["requests"]
+    assert len(fresh) == 1 and fresh[0]["seq"] > seq
+
+
+def test_feed_records_a_failover_trail(monkeypatch):
+    monkeypatch.setattr(
+        providers, "_completion", by_model({config.PROVIDER_MODELS["groq"]: fails()})
+    )
+    post()
+    row = client.get("/admin/feed").json()["requests"][0]
+    assert row["provider"] == "gemini"
+    assert row["failovers"] == 1
+    assert [a["provider"] for a in row["attempts"]] == ["groq", "gemini"]
+    assert row["attempts"][0]["error_type"] == "server_error"
+
+
+def test_feed_records_failed_and_queued_outcomes(monkeypatch):
+    all_providers_down(monkeypatch)
+    post()                                  # interactive -> failed
+    post(**{"X-Class": "deferrable"})       # deferrable  -> queued
+    statuses = [r["status"] for r in client.get("/admin/feed").json()["requests"]]
+    assert statuses == ["queued", "failed"]   # newest first
+
+
+def test_reset_clears_the_feed():
+    post()
+    client.post("/admin/reset")
+    assert client.get("/admin/feed").json()["requests"] == []

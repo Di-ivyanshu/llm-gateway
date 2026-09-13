@@ -28,8 +28,12 @@ def _b(name: str, default: bool = False) -> bool:
 PROVIDERS: list[str] = ["groq", "gemini", "openrouter"]
 
 # Default model per provider (LiteLLM ids: "<provider>/<model>").
+# Groq decommissioned llama-3.3-70b-versatile on 2026-08-16; gpt-oss-120b is the
+# replacement they point at (same 131k context, cheaper: $0.15/$0.60 per 1M vs
+# $0.59/$0.79). The other option they offer, qwen/qwen3.6-27b, is smaller AND
+# dearer ($0.60/$3.00), so it is not the default.
 PROVIDER_MODELS: dict[str, str] = {
-    "groq": os.getenv("GROQ_MODEL", "groq/llama-3.3-70b-versatile"),
+    "groq": os.getenv("GROQ_MODEL", "groq/openai/gpt-oss-120b"),
     "gemini": os.getenv("GEMINI_MODEL", "gemini/gemini-2.5-flash-lite"),
     "openrouter": os.getenv(
         "OPENROUTER_MODEL", "openrouter/meta-llama/llama-3.3-70b-instruct:free"
@@ -54,6 +58,17 @@ PREFERENCE: dict[str, list[str]] = {
 DEFAULT_CLASS = "interactive"
 
 REQUEST_TIMEOUT_S: float = _f("REQUEST_TIMEOUT_S", 30)
+
+# Extra keyword arguments sent with every call to a given provider.
+# gpt-oss models "think" before answering, and that thinking is billed and waited
+# for: measured on Groq, the same one-word answer took 47 completion tokens and
+# 10.1s at the default effort, versus 25 tokens and 0.4s at "low". Free tiers are
+# token-capped, so low is the default here. Empty the dict (or set
+# GROQ_REASONING_EFFORT= ) if you switch Groq to a model that rejects the param.
+_GROQ_EFFORT = os.getenv("GROQ_REASONING_EFFORT", "low").strip()
+PROVIDER_EXTRA_PARAMS: dict[str, dict[str, object]] = {
+    "groq": {"reasoning_effort": _GROQ_EFFORT} if _GROQ_EFFORT else {},
+}
 
 # Return canned completions instead of calling a provider. Used by the chaos
 # demo and the availability benchmark so they never burn real quota.
@@ -88,7 +103,9 @@ WORKER_POLL_S: float = _f("WORKER_POLL_S", 1.0)
 # USD per 1M tokens (input, output). Free tiers are 0 — override in .env when a
 # provider starts charging you.
 MODEL_PRICES: dict[str, tuple[float, float]] = {
-    "groq/llama-3.3-70b-versatile": (0.59, 0.79),
+    "groq/openai/gpt-oss-120b": (0.15, 0.60),
+    "groq/qwen/qwen3.6-27b": (0.60, 3.00),
+    "groq/llama-3.3-70b-versatile": (0.59, 0.79),   # decommissioned 2026-08-16
     "gemini/gemini-2.5-flash-lite": (0.10, 0.40),
     "gemini/gemini-2.5-flash": (0.30, 2.50),
     "openrouter/meta-llama/llama-3.3-70b-instruct:free": (0.0, 0.0),

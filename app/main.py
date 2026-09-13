@@ -6,7 +6,9 @@ Everything a caller can reach:
     GET  /metrics                Prometheus scrape target
     POST /v1/chat/completions    OpenAI-compatible; routed, failed over, priced
     GET  /v1/jobs/{job_id}       result of a deferred job
+    GET  /dashboard              live console: providers, breakers, requests, cost
     GET  /admin/status           breaker + health + queue, as JSON
+    GET  /admin/feed             everything the dashboard polls, in one payload
     POST /admin/chaos            degrade a provider on purpose (the demo)
     POST /admin/reset            clear breakers, health window and queue
 
@@ -19,14 +21,16 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, Header, Response
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
-from . import breaker, chaos, config, health, metrics, queue, router
-from .shapes import completion_body
+from . import breaker, chaos, config, health, metrics, queue, recent, router
+from .shapes import completion_body, completion_chunks
 
 log = logging.getLogger("gateway")
 
@@ -71,6 +75,7 @@ class ChatRequest(BaseModel):
     messages: list[Message]
     temperature: float = 0.2
     max_tokens: int | None = None
+    stream: bool = False
 
 
 class ChaosRequest(BaseModel):
@@ -88,6 +93,15 @@ def _error(status: int, message: str, err_type: str) -> JSONResponse:
     return JSONResponse(
         status_code=status,
         content={"error": {"message": message, "type": err_type, "code": err_type}},
+    )
+
+
+def _sse(body: dict, headers: dict[str, str]) -> StreamingResponse:
+    """Serve a finished completion as an SSE stream (see shapes.completion_chunks)."""
+    return StreamingResponse(
+        completion_chunks(body),
+        media_type="text/event-stream",
+        headers={**headers, "Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
 
 
@@ -157,8 +171,14 @@ def chat_completions(
             metrics.CLIENT_REQUESTS.labels(
                 tenant=x_tenant, feature=x_feature, status="replayed"
             ).inc()
+            recent.record(
+                tenant=x_tenant, feature=x_feature, request_class=request_class,
+                status="replayed",
+            )
             response.headers["X-Idempotent-Replay"] = "true"
             if seen.get("response"):
+                if req.stream:
+                    return _sse(seen["response"], dict(response.headers))
                 return seen["response"]
             return JSONResponse(status_code=202, content=seen)
 
@@ -188,11 +208,19 @@ def chat_completions(
         result["cost_usd"],
     )
     metrics.CLIENT_REQUESTS.labels(tenant=x_tenant, feature=x_feature, status="ok").inc()
+    recent.record(
+        tenant=x_tenant, feature=x_feature, request_class=request_class, status="ok",
+        provider=result["provider"], latency_ms=result["latency_ms"],
+        failovers=result["failovers"], cost_usd=result["cost_usd"],
+        attempts=result["attempts"],
+    )
     response.headers["X-Gateway-Provider"] = result["provider"]
     response.headers["X-Gateway-Latency-Ms"] = str(result["latency_ms"])
     response.headers["X-Gateway-Failovers"] = str(result["failovers"])
     if x_idempotency_key:
         queue.remember(x_idempotency_key, {"status": "done", "response": body})
+    if req.stream:
+        return _sse(body, dict(response.headers))
     return body
 
 
@@ -218,6 +246,10 @@ def _degraded(
         metrics.CLIENT_REQUESTS.labels(
             tenant=tenant, feature=feature, status="failed"
         ).inc()
+        recent.record(
+            tenant=tenant, feature=feature, request_class=request_class, status="failed",
+            attempts=exc.attempts, error_type=exc.reason,
+        )
         return _error(
             503,
             "all providers are unavailable; retry shortly "
@@ -245,6 +277,10 @@ def _degraded(
     if idempotency_key:
         queue.claim(idempotency_key, payload)
     metrics.CLIENT_REQUESTS.labels(tenant=tenant, feature=feature, status="queued").inc()
+    recent.record(
+        tenant=tenant, feature=feature, request_class=request_class, status="queued",
+        attempts=exc.attempts, error_type=exc.reason, job_id=job_id,
+    )
     return JSONResponse(status_code=202, content=payload, headers=dict(response.headers))
 
 
@@ -271,6 +307,35 @@ def admin_status(x_admin_token: str | None = Header(default=None, alias="X-Admin
         "preference": config.PREFERENCE,
         "fake_providers": config.FAKE_PROVIDERS,
     }
+
+
+@app.get("/admin/feed")
+def admin_feed(
+    since: int = 0,
+    x_admin_token: str | None = Header(default=None, alias="X-Admin-Token"),
+):
+    """One poll for the dashboard: provider state + the newest requests.
+
+    `since` is the highest `seq` the caller has already seen, so a 1-second poll
+    ships only what changed.
+    """
+    if not _admin_ok(x_admin_token):
+        return _error(403, "bad admin token", "auth")
+    return {
+        "now": time.time(),
+        "providers": breaker.snapshot(),
+        "preference": config.PREFERENCE,
+        "queue_depth": queue.depth(),
+        "chaos": chaos.snapshot(),
+        "models": config.PROVIDER_MODELS,
+        "requests": recent.events(since_seq=since),
+    }
+
+
+@app.get("/dashboard", include_in_schema=False)
+def dashboard() -> FileResponse:
+    """The live console — plain HTML, no build step, no Grafana required."""
+    return FileResponse(Path(__file__).parent / "static" / "dashboard.html")
 
 
 @app.post("/admin/chaos")
@@ -303,4 +368,5 @@ def admin_reset(x_admin_token: str | None = Header(default=None, alias="X-Admin-
     breaker.reset()
     health.clear()
     queue.clear()
+    recent.clear()
     return {"status": "reset"}

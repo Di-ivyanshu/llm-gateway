@@ -115,6 +115,7 @@ def call(
                 temperature=temperature,
                 max_tokens=max_tokens,
                 timeout=timeout if timeout is not None else config.REQUEST_TIMEOUT_S,
+                **config.PROVIDER_EXTRA_PARAMS.get(provider, {}),
             )
     except ProviderError:
         raise

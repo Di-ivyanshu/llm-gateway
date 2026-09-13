@@ -57,6 +57,8 @@ client ──▶   │  POST /v1/chat/completions   (X-Tenant, X-Feature,     �
 | Cost attribution by tenant × feature | `app/cost.py` |
 | Chaos injection for the demo | `app/chaos.py`, `POST /admin/chaos` |
 | Prometheus metrics + Grafana dashboard | `app/metrics.py`, `dashboards/gateway.json` |
+| OpenAI SSE streaming (buffered, so failover survives) | `app/shapes.py` |
+| Live console + request log | `app/static/dashboard.html`, `app/recent.py` |
 
 ## API
 
@@ -66,7 +68,9 @@ client ──▶   │  POST /v1/chat/completions   (X-Tenant, X-Feature,     �
 | `GET /v1/jobs/{id}` | Result of a job that was queued during an outage. |
 | `GET /health` | Liveness. |
 | `GET /metrics` | Prometheus scrape target. |
+| `GET /dashboard` | **Live console** — providers, breakers, requests, cost. No Grafana needed. |
 | `GET /admin/status` | Breaker state, health window, queue depth, active chaos. |
+| `GET /admin/feed?since=` | What the dashboard polls: provider state + the newest requests. |
 | `POST /admin/chaos` | Degrade a provider on purpose (`{"provider":"groq","mode":"error"}`). |
 | `POST /admin/reset` | Clear chaos, breakers, health window and queue. |
 
@@ -82,6 +86,11 @@ Request headers:
 
 The response adds a non-standard `gateway` block (which provider answered, how
 many failovers, the estimated cost). OpenAI clients ignore it.
+
+`"stream": true` is supported and emits standard `chat.completion.chunk` SSE
+events. The gateway routes to completion **first** and then streams the text
+out: once the first byte has left you can no longer fail over, and failover is
+the point of this service.
 
 ## Run it
 
@@ -113,7 +122,7 @@ python -m app.worker
 ## Tests & benchmark
 
 ```
-pytest -q                        # 105 tests, fully offline: no keys, no Redis, no network
+pytest -q                        # 117 tests, fully offline: no keys, no Redis, no network
 python -m bench.outage_test      # ~25s availability benchmark, fake providers
 ```
 
@@ -121,7 +130,15 @@ The benchmark drives steady traffic while `/admin/chaos` degrades providers one
 by one, then compares the gateway against a single-provider baseline. Providers
 are faked, so it costs nothing and is repeatable.
 
-## Dashboard
+## Dashboards
+
+**Built in — open <http://localhost:8080/dashboard> once the gateway is running.**
+Availability, requests/sec by provider, p95, queue depth and spend, a live table
+of every request with its routing trail (`groq(server_error) → gemini`), and
+buttons that break a provider on purpose so you can watch the breaker trip and
+heal. No Prometheus, no Grafana, no build step.
+
+For long-term history, the Prometheus + Grafana path is still there:
 
 ```
 prometheus.exe --config.file=D:\llm-gateway\ops\prometheus.yml     # scrapes :8080/metrics
@@ -170,8 +187,15 @@ Groq / Gemini / OpenRouter. No Docker.
 
 Part of a six-project portfolio. Its sibling
 [Nocturne (Knowledge-Graph RAG)](https://github.com/Di-ivyanshu/nocturne-RAG)
-routes its LLM calls through this gateway by setting one variable:
+**runs on this gateway** — its `.env` says:
 
 ```
+LLM_PROVIDER=openai
 OPENAI_BASE_URL=http://localhost:8080/v1
 ```
+
+Nocturne needed one change to adopt it: `src/llm.py` now sends the three
+attribution headers (tenant `nocturne`, feature `rag`). Both its blocking and
+its streaming answer paths go through here, so a Nocturne answer survives a
+provider outage and shows up on the cost panel. Start the gateway before
+Nocturne — that is the price of routing through one service.

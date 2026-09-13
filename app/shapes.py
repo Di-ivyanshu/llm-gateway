@@ -6,8 +6,11 @@ not be able to tell whether its answer came straight through or via the queue.
 """
 from __future__ import annotations
 
+import json
+import re
 import time
 import uuid
+from collections.abc import Iterator
 from typing import Any
 
 
@@ -39,3 +42,35 @@ def completion_body(result: dict[str, Any]) -> dict[str, Any]:
             "attempts": result["attempts"],
         },
     }
+
+
+def _event(payload: dict[str, Any]) -> str:
+    return f"data: {json.dumps(payload)}\n\n"
+
+
+def completion_chunks(body: dict[str, Any]) -> Iterator[str]:
+    """Re-emit a finished completion as OpenAI `chat.completion.chunk` SSE events.
+
+    The gateway **buffers**: it routes the request to completion first — failing
+    over if it has to — and only then streams the text out. Real token-by-token
+    passthrough would mean committing to a provider with the first byte, and you
+    cannot fail over mid-stream. Clients see the same wire format either way.
+    """
+    head = {
+        "id": body["id"],
+        "object": "chat.completion.chunk",
+        "created": body["created"],
+        "model": body["model"],
+    }
+
+    def frame(delta: dict[str, Any], finish: str | None) -> str:
+        return _event(
+            {**head, "choices": [{"index": 0, "delta": delta, "finish_reason": finish}]}
+        )
+
+    yield frame({"role": "assistant"}, None)
+    content = body["choices"][0]["message"]["content"]
+    for piece in re.findall(r"\S+\s*", content):  # word + its trailing space
+        yield frame({"content": piece}, None)
+    yield frame({}, "stop")
+    yield "data: [DONE]\n\n"

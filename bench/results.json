@@ -1,33 +1,33 @@
 {
-  "requests": 988,
+  "requests": 984,
   "availability": 1.0,
-  "answered_immediately": 869,
-  "queued_during_total_outage": 119,
+  "answered_immediately": 866,
+  "queued_during_total_outage": 118,
   "availability_while_degraded": 1.0,
-  "single_provider_availability": 0.2813765182186235,
+  "single_provider_availability": 0.2815040650406504,
   "failed": 0,
   "providers": {
-    "groq": 278,
-    "gemini": 276,
-    "openrouter": 315,
-    "queued": 119
+    "groq": 277,
+    "gemini": 275,
+    "openrouter": 314,
+    "queued": 118
   },
   "per_phase": {
     "healthy": {
-      "requests": 119,
+      "requests": 118,
       "availability": 1.0,
       "providers": {
-        "groq": 119
+        "groq": 118
       },
-      "p95_ms": 13.1
+      "p95_ms": 18.4
     },
     "groq down": {
-      "requests": 237,
+      "requests": 236,
       "availability": 1.0,
       "providers": {
-        "gemini": 237
+        "gemini": 236
       },
-      "p95_ms": 15.5
+      "p95_ms": 18.3
     },
     "groq + gemini down": {
       "requests": 158,
@@ -35,25 +35,25 @@
       "providers": {
         "openrouter": 158
       },
-      "p95_ms": 14.1
+      "p95_ms": 18.5
     },
     "total outage (deferrable)": {
-      "requests": 119,
+      "requests": 118,
       "availability": 1.0,
       "providers": {
-        "queued": 119
+        "queued": 118
       },
-      "p95_ms": 8.4
+      "p95_ms": 13.7
     },
     "recovering": {
-      "requests": 355,
+      "requests": 354,
       "availability": 1.0,
       "providers": {
-        "openrouter": 157,
+        "openrouter": 156,
         "gemini": 39,
         "groq": 159
       },
-      "p95_ms": 14.4
+      "p95_ms": 20.9
     }
   }
 }

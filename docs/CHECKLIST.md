@@ -101,7 +101,9 @@ Goal: you can see each provider's success rate and latency live on Grafana.
 - [ ] 🧑 Run Grafana (local binary), add Prometheus datasource.
 - [x] ⌨️ Build 2 Grafana panels: per-provider **latency (p95)** and **error rate**.
 - [x] ⌨️ **`tests/test_health.py`**: use `fakeredis`; test record + the percentile math.
-- [ ] ✅ Send some traffic → watch the panels move.
+- [x] ✅ Send some traffic → watch the panels move.
+      *(Built-in console at `/dashboard` covers this without Grafana; the Grafana
+      import below is still optional for long-term history.)*
 - [x] ⌨️ `git commit -m "Phase 2: Redis health window + Prometheus /metrics + Grafana"`
 
 **Milestone:** Grafana shows live per-provider health. (Instrument BEFORE failover.)
@@ -174,9 +176,9 @@ dashboard shows the trip → reroute → recovery, with an availability % and a 
 ---
 
 ## Finale — connect it to Nocturne (the cohesion move)
-- [ ] ⌨️ In **Nocturne's `.env`**: `OPENAI_BASE_URL=http://localhost:8080/v1`
-- [ ] ✅ Nocturne's LLM calls now flow through the gateway → the two projects reference each other.
-- [ ] ⌨️ Mention this link in both READMEs.
+- [x] ⌨️ In **Nocturne's `.env`**: `OPENAI_BASE_URL=http://localhost:8080/v1`
+- [x] ✅ Nocturne's LLM calls now flow through the gateway → the two projects reference each other.
+- [x] ⌨️ Mention this link in both READMEs.
 
 **Resume line:** *Built an LLM gateway with per-provider circuit breaking and automatic
 failover; sustained X% availability through simulated provider outages, with per-tenant

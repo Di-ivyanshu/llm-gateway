@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-from app import breaker, chaos, config, health, providers, queue
+from app import breaker, chaos, config, health, providers, queue, recent
 from tests.helpers import FakeResponse
 
 
@@ -21,6 +21,7 @@ def clean_state(monkeypatch):
     queue.set_backend(queue.MemoryBackend())
     breaker.reset()
     chaos.clear()
+    recent.clear()
     for provider in config.PROVIDERS:
         monkeypatch.setitem(config.PROVIDER_KEYS, provider, "test-key")
     monkeypatch.setattr(config, "HEDGE_MS", 0)          # opt-in per test
@@ -29,3 +30,4 @@ def clean_state(monkeypatch):
     yield
     breaker.reset()
     chaos.clear()
+    recent.clear()

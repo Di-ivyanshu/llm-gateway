@@ -33,6 +33,22 @@ def test_call_passes_the_right_model_and_key(monkeypatch):
     assert seen["max_tokens"] == 64
 
 
+def test_provider_extra_params_are_sent(monkeypatch):
+    """Groq's gpt-oss models bill their own thinking — we ask for the cheap tier."""
+    seen = {}
+    monkeypatch.setattr(
+        config, "PROVIDER_EXTRA_PARAMS", {"groq": {"reasoning_effort": "low"}}
+    )
+    monkeypatch.setattr(providers, "_completion", lambda **kw: seen.update(kw) or FakeResponse())
+
+    providers.call("groq", MESSAGES)
+    assert seen["reasoning_effort"] == "low"
+
+    seen.clear()
+    providers.call("gemini", MESSAGES)          # other providers get nothing extra
+    assert "reasoning_effort" not in seen
+
+
 def test_failure_is_wrapped_with_a_classified_type(monkeypatch):
     def boom(**kw):
         raise type("RateLimitError", (Exception,), {})("slow down")
