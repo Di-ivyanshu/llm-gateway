@@ -13,3 +13,9 @@ __pycache__/
 
 # local session context (private)
 CLAUDE.md
+
+# private prep notes (not for the public repo)
+docs/GUIDE.md
+
+# rendered private guide
+LLM_Gateway_Guide.pdf

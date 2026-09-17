@@ -94,12 +94,26 @@ the point of this service.
 
 ## Run it
 
+First time only:
+
 ```
 python -m venv .venv
-.venv\Scripts\activate                       # Windows
+.venv\Scripts\activate
 pip install -r requirements.txt
 copy .env.example .env                       # then paste your provider keys
-python -m uvicorn app.main:app --port 8080
+```
+
+After that, on Windows, double-click one of these:
+
+| File | What it starts |
+| --- | --- |
+| `start.cmd` | the gateway with your real keys, and opens the dashboard |
+| `demo.cmd` | the gateway with **fake** providers + demo traffic + the dashboard — costs nothing, and is what the demo runs on |
+
+Or the long way, which is all either script does:
+
+```
+.venv\Scripts\python.exe -m uvicorn app.main:app --port 8080
 ```
 
 ```
