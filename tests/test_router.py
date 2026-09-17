@@ -101,3 +101,32 @@ def test_no_hedge_when_the_primary_is_fast(monkeypatch):
     out = router.route(MESSAGES, request_class="interactive", tenant="t", feature="f")
     assert out["provider"] == "groq"
     assert len(out["attempts"]) == 1
+
+
+def test_a_deferrable_request_does_not_eat_a_half_open_probe(monkeypatch):
+    """groq is last on the deferrable list; openrouter answers, so groq keeps its probe."""
+    now = time.time()
+    for _ in range(config.BREAKER_MIN_SAMPLES):
+        health.record("groq", False, 10, "server_error", now=now)
+        breaker.on_failure("groq", "server_error", now=now)
+
+    monkeypatch.setattr(config, "BREAKER_COOLDOWN_S", 0)     # straight to half_open
+    assert breaker.state("groq") == breaker.HALF_OPEN
+
+    out = router.route(MESSAGES, request_class="deferrable", tenant="t", feature="f")
+    assert out["provider"] == "openrouter"                   # groq was never called
+
+    # ...so the next interactive request can still probe groq
+    assert breaker.allow("groq") is True
+
+
+def test_preference_lists_can_come_from_env(monkeypatch):
+    """PREFERENCE_INTERACTIVE=... reorders failover without touching code."""
+    monkeypatch.setenv("PREFERENCE_INTERACTIVE", "openrouter, groq")
+    assert config._preference("interactive", ["groq", "gemini"]) == ["openrouter", "groq"]
+
+    monkeypatch.setenv("PREFERENCE_INTERACTIVE", "nonsense,  ")   # nothing valid
+    assert config._preference("interactive", ["groq", "gemini"]) == ["groq", "gemini"]
+
+    monkeypatch.delenv("PREFERENCE_INTERACTIVE")
+    assert config._preference("interactive", ["groq"]) == ["groq"]

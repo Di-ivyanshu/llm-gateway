@@ -93,3 +93,28 @@ def test_breakers_are_independent(provider):
     others = [p for p in config.PROVIDERS if p != provider]
     assert breaker.state(provider) == breaker.OPEN
     assert all(breaker.state(other) == breaker.CLOSED for other in others)
+
+
+def test_an_unused_probe_token_is_given_back():
+    """A request answered by someone else must not eat a half-open probe token.
+
+    Regression: `candidates()` asks every provider on the preference list, so a
+    deferrable request (openrouter → gemini → groq) took groq's only probe token
+    and then never called it. Nobody probed groq again, so it sat in half_open
+    forever — neither healing nor re-opening.
+    """
+    now = time.time()
+    _fail(n=config.BREAKER_MIN_SAMPLES, now=now)
+    later = now + config.BREAKER_COOLDOWN_S + 1
+    assert breaker.state("groq", now=later) == breaker.HALF_OPEN
+
+    assert breaker.allow("groq", now=later) is True      # token taken...
+    assert breaker.allow("groq", now=later) is False     # ...and it was the only one
+    breaker.release("groq")                              # never actually called
+    assert breaker.allow("groq", now=later) is True      # so the next request can probe
+
+
+def test_release_is_a_noop_for_a_closed_breaker():
+    breaker.release("gemini")
+    assert breaker.state("gemini") == breaker.CLOSED
+    assert breaker.allow("gemini")

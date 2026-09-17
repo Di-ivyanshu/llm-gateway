@@ -75,6 +75,21 @@ def allow(provider: str, *, now: float | None = None) -> bool:
         return False
 
 
+def release(provider: str) -> None:
+    """Give a half-open probe token back, unused.
+
+    `allow()` is asked about every provider in a preference list, but only the
+    ones actually called consume a probe. Without this, a request that was
+    answered by an earlier provider would quietly eat a later provider's only
+    probe token — and a half-open breaker with nobody probing it never heals and
+    never re-opens. It just sits there.
+    """
+    with _lock:
+        entry = _entry(provider)
+        if entry["state"] == HALF_OPEN:
+            entry["probes"] = max(0, entry["probes"] - 1)
+
+
 def _should_trip(provider: str, now: float) -> bool:
     stats = health.stats(provider, now=now)
     if stats["count"] < config.BREAKER_MIN_SAMPLES:

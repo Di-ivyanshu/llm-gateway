@@ -47,13 +47,22 @@ PROVIDER_KEYS: dict[str, str] = {
     "openrouter": os.getenv("OPENROUTER_API_KEY", "") or os.getenv("OPENAI_API_KEY", ""),
 }
 
+def _preference(name: str, default: list[str]) -> list[str]:
+    """Read a preference list from env, e.g. PREFERENCE_INTERACTIVE=groq,openrouter."""
+    raw = os.getenv(f"PREFERENCE_{name.upper()}", "").strip()
+    if not raw:
+        return default
+    chosen = [p.strip().lower() for p in raw.split(",") if p.strip().lower() in PROVIDERS]
+    return chosen or default
+
+
 # Order to try providers in, per request class (header X-Class).
 #   interactive — a user is waiting: fastest free tier first (Groq).
 #   deferrable  — nobody is waiting: spend the paid OpenRouter allowance first
 #                 and keep the free daily caps for interactive traffic.
 PREFERENCE: dict[str, list[str]] = {
-    "interactive": ["groq", "gemini", "openrouter"],
-    "deferrable": ["openrouter", "gemini", "groq"],
+    "interactive": _preference("interactive", ["groq", "gemini", "openrouter"]),
+    "deferrable": _preference("deferrable", ["openrouter", "gemini", "groq"]),
 }
 DEFAULT_CLASS = "interactive"
 

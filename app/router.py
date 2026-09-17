@@ -107,12 +107,17 @@ def route(
     call_kwargs = {"temperature": temperature, "max_tokens": max_tokens}
     start_index = 0
     hedged = False
+    # `candidates()` took a probe token from every half-open provider on the
+    # list; whatever we don't end up calling has to give its token back.
+    unused = set(order)
 
     if request_class == "interactive" and config.HEDGE_MS > 0 and len(order) >= 2:
         hedged = True
         result, hedge_attempts = _hedge(order[0], order[1], messages, call_kwargs)
         attempts.extend(hedge_attempts)
+        unused -= {a["provider"] for a in hedge_attempts}
         if result is not None:
+            _release(unused)
             return _finish(result, attempts, hedged, tenant, feature)
         start_index = len(hedge_attempts)  # 1 if the primary failed fast, else 2
 
@@ -124,10 +129,19 @@ def route(
             ).inc()
         result, record = _attempt(provider, messages, call_kwargs)
         attempts.append(record)
+        unused.discard(provider)
         if result is not None:
+            _release(unused)
             return _finish(result, attempts, hedged, tenant, feature)
 
+    _release(unused)
     raise NoProviderAvailable("all_failed", attempts)
+
+
+def _release(providers: set[str]) -> None:
+    """Hand back the probe tokens of providers this request never called."""
+    for provider in providers:
+        breaker.release(provider)
 
 
 def _finish(
